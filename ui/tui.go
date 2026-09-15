@@ -2,26 +2,40 @@
 // dashboard with a two-second refresh, keyboard-driven power, brightness, and
 // white-temperature controls, and a switcher for jumping between lights.
 //
-// The layout is built entirely from fixed-width segments so that state
-// changes never shift neighboring text — the view stays still and only
-// values change.
+// The sliders are native bubbles/progress bars with spring animation at
+// 60 fps, and the layout is built from fixed-width segments so state changes
+// never shift neighboring text.
 package ui
 
 import (
+	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lohitcode/lumen/light"
 )
 
+// Hooks let the embedder react to in-app actions, e.g. to persist them.
+type Hooks struct {
+	// OnSwitch is called when the user switches to another light.
+	OnSwitch func(light.Light)
+	// OnRename is called with the light and its new display name (empty
+	// when the user cleared the name).
+	OnRename func(l light.Light, name string)
+}
+
 // Run starts the terminal UI for the given light and blocks until quit.
-// onSwitch is called whenever the user switches to another light, so callers
-// can persist the choice.
-func Run(l light.Light, onSwitch func(light.Light)) error {
-	// Alternate screen keeps the TUI separate from the shell's scrollback; mouse
-	// reporting also captures trackpad/wheel gestures instead of scrolling it.
-	p := tea.NewProgram(newModel(l, onSwitch), tea.WithAltScreen(), tea.WithMouseAllMotion())
+// labels holds user-chosen display names keyed by light identity, and hooks
+// receive switch/rename events for persistence.
+func Run(l light.Light, labels map[string]string, hooks Hooks) error {
+	// Alternate screen keeps the TUI separate from the shell's scrollback;
+	// mouse reporting captures trackpad/wheel gestures, and the explicit
+	// frame rate keeps the spring-animated sliders at the full 60 fps.
+	p := tea.NewProgram(newModel(l, labels, hooks),
+		tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithFPS(60))
 	_, err := p.Run()
 	return err
 }
@@ -60,23 +74,60 @@ type tickMsg time.Time
 type spinnerTickMsg time.Time
 
 type model struct {
-	current  light.Light
-	status   light.State
-	onSwitch func(light.Light)
-	mode     mode
-	found    []light.Light
-	pick     int
-	cursor   int
-	message  string
-	err      error
-	failures int
-	frame    int
-	busy     bool
-	quitting bool
+	current       light.Light
+	status        light.State
+	labels        map[string]string
+	hooks         Hooks
+	brightnessBar progress.Model
+	tempBar       progress.Model
+	input         textinput.Model
+	renaming      bool
+	mode          mode
+	found         []light.Light
+	pick          int
+	cursor        int
+	message       string
+	err           error
+	failures      int
+	frame         int
+	busy          bool
+	quitting      bool
 }
 
-func newModel(l light.Light, onSwitch func(light.Light)) model {
-	m := model{current: l, onSwitch: onSwitch, message: connectingMessage}
+// newBrightnessBar builds the spring-animated brightness slider.
+func newBrightnessBar() progress.Model {
+	b := progress.New(
+		progress.WithWidth(meterWidth),
+		progress.WithFillCharacters('█', '█'),
+		progress.WithSolidFill("#F5D67A"),
+		progress.WithoutPercentage(),
+	)
+	b.EmptyColor = string(trackColor)
+	return b
+}
+
+// newTempBar builds the temperature slider; its fill sweeps warm to cool
+// across the bar so the color itself reads as the kelvin value.
+func newTempBar() progress.Model {
+	b := progress.New(
+		progress.WithWidth(meterWidth),
+		progress.WithFillCharacters('█', '█'),
+		progress.WithScaledGradient("#FFB86B", "#7FD1FF"),
+		progress.WithoutPercentage(),
+	)
+	b.EmptyColor = string(trackColor)
+	return b
+}
+
+func newModel(l light.Light, labels map[string]string, hooks Hooks) model {
+	m := model{
+		current:       l,
+		labels:        labels,
+		hooks:         hooks,
+		brightnessBar: newBrightnessBar(),
+		tempBar:       newTempBar(),
+		message:       connectingMessage,
+	}
 	// Seed with the real state when it is already known so the first paint
 	// never flashes wrong values; the refresh loop takes over from there.
 	if state, err := l.State(); err == nil {
@@ -87,7 +138,7 @@ func newModel(l light.Light, onSwitch func(light.Light)) model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.refresh(), nextTick(), nextSpinner())
+	return tea.Batch(m.refresh(), nextTick(), nextSpinner(), m.syncBars())
 }
 
 func nextTick() tea.Cmd {
@@ -96,6 +147,28 @@ func nextTick() tea.Cmd {
 
 func nextSpinner() tea.Cmd {
 	return tea.Tick(spinnerEvery, func(t time.Time) tea.Msg { return spinnerTickMsg(t) })
+}
+
+// syncBars points both sliders at the current state; the bars glide there
+// on their internal springs instead of jumping.
+func (m model) syncBars() tea.Cmd {
+	r := m.current.Ranges()
+	brightness := clamp01(float64(m.status.Brightness) / 100)
+	temp := clamp01(float64(m.status.Temp-r.Temp.Min) / float64(rangeSize(r.Temp)))
+	return tea.Batch(
+		m.brightnessBar.SetPercent(brightness),
+		m.tempBar.SetPercent(temp),
+	)
+}
+
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
 }
 
 func (m model) refresh() tea.Cmd {
@@ -116,6 +189,14 @@ func (m model) discover() tea.Cmd {
 	}
 }
 
+// labelFor returns a light's user-chosen alias, or its device label.
+func (m model) labelFor(l light.Light) string {
+	if alias, ok := m.labels[identity(l)]; ok && alias != "" {
+		return alias
+	}
+	return l.Label()
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -127,33 +208,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case modePicking:
-			switch msg.String() {
-			case "esc", "q":
-				m.mode = modeNormal
-				return m, nil
-			case "up", "k":
-				if m.pick > 0 {
-					m.pick--
-				}
-			case "down", "j":
-				if m.pick < len(m.found)-1 {
-					m.pick++
-				}
-			case "enter":
-				chosen := m.found[m.pick]
-				m.mode = modeNormal
-				if identity(chosen) != identity(m.current) {
-					// The header updates to the new light's name — that is
-					// the feedback, so the status line stays clean.
-					m.current = chosen
-					m.message = ""
-					if m.onSwitch != nil {
-						m.onSwitch(chosen)
-					}
-					return m, m.refresh()
-				}
-			}
-			return m, nil
+			return m.updatePicking(msg)
 		}
 
 		switch msg.String() {
@@ -181,13 +236,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "right", "l":
 			return m.adjust(5, 100)
 		}
-	case spinnerTickMsg:
-		// Only animate while there is something to wait for; a steady dot
-		// reads calmer when everything is already live.
-		if m.busy || m.mode == modeSearching {
-			m.frame = (m.frame + 1) % len(spinnerFrames)
-		}
-		return m, nextSpinner()
+	case progress.FrameMsg:
+		// Both sliders animate on their internal springs; route frames and
+		// keep the returned command alive so the animation runs at 60 fps.
+		bm, bcmd := m.brightnessBar.Update(msg)
+		m.brightnessBar = bm.(progress.Model)
+		tm, tcmd := m.tempBar.Update(msg)
+		m.tempBar = tm.(progress.Model)
+		return m, tea.Batch(bcmd, tcmd)
 	case statusMsg:
 		m.busy = false
 		if msg.err != nil {
@@ -201,7 +257,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.status = msg.state
 		m.message = ""
-		return m, nil
+		return m, m.syncBars()
 	case actionMsg:
 		m.busy = false
 		if msg.err != nil {
@@ -235,17 +291,94 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// adjust nudges the selected row's value by delta (brightness, temperature)
-// and sends the clamped result to the light.
+func (m model) updatePicking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.renaming {
+		switch msg.String() {
+		case "enter":
+			name := strings.TrimSpace(m.input.Value())
+			chosen := m.found[m.pick]
+			id := identity(chosen)
+			if name == "" {
+				delete(m.labels, id)
+			} else {
+				m.labels[id] = name
+			}
+			if m.hooks.OnRename != nil {
+				m.hooks.OnRename(chosen, name)
+			}
+			m.renaming = false
+			m.input.Blur()
+			return m, nil
+		case "esc":
+			m.renaming = false
+			m.input.Blur()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+	}
+
+	switch msg.String() {
+	case "esc", "q":
+		m.mode = modeNormal
+		return m, nil
+	case "up", "k":
+		if m.pick > 0 {
+			m.pick--
+		}
+	case "down", "j":
+		if m.pick < len(m.found)-1 {
+			m.pick++
+		}
+	case "n":
+		m.renaming = true
+		m.input = newRenameInput(m.labels[identity(m.found[m.pick])])
+		return m, textinput.Blink
+	case "enter":
+		chosen := m.found[m.pick]
+		m.mode = modeNormal
+		if identity(chosen) != identity(m.current) {
+			// The header updates to the new light's name — that is the
+			// feedback, so the status line stays clean.
+			m.current = chosen
+			m.message = ""
+			if m.hooks.OnSwitch != nil {
+				m.hooks.OnSwitch(chosen)
+			}
+			return m, m.refresh()
+		}
+	}
+	return m, nil
+}
+
+// newRenameInput builds the inline editor used to alias a light in the
+// switcher: prefilled with any existing alias, focused, no prompt clutter.
+func newRenameInput(alias string) textinput.Model {
+	in := textinput.New()
+	in.Placeholder = "Light name"
+	in.CharLimit = 32
+	in.Width = 30
+	in.Prompt = ""
+	in.SetValue(alias)
+	in.Focus()
+	return in
+}
+
+// adjust nudges the selected row's value by delta (brightness, temperature).
+// The slider starts gliding immediately for instant feedback, then the
+// refresh reconciles with the bulb's real state.
 func (m model) adjust(brightness, temp int) (tea.Model, tea.Cmd) {
-	ranges := m.current.Ranges()
+	r := m.current.Ranges()
 	m.busy = true
 	if m.cursor == 0 {
-		value := ranges.Brightness.Clamp(m.status.Brightness + brightness)
-		return m, m.change(func(l light.Light) error { return l.SetBrightness(value) })
+		value := r.Brightness.Clamp(m.status.Brightness + brightness)
+		slide := m.brightnessBar.SetPercent(clamp01(float64(value) / 100))
+		return m, tea.Batch(slide, m.change(func(l light.Light) error { return l.SetBrightness(value) }))
 	}
-	value := ranges.Temp.Clamp(m.status.Temp + temp)
-	return m, m.change(func(l light.Light) error { return l.SetTemp(value) })
+	value := r.Temp.Clamp(m.status.Temp + temp)
+	slide := m.tempBar.SetPercent(clamp01(float64(value-r.Temp.Min) / float64(rangeSize(r.Temp))))
+	return m, tea.Batch(slide, m.change(func(l light.Light) error { return l.SetTemp(value) }))
 }
 
 func identity(l light.Light) string { return l.Driver() + "/" + l.Address() }

@@ -68,10 +68,8 @@ func (m model) View() string {
 		fmt.Sprintf("%d%% • %d K", brightness, temp))
 
 	rows := []string{
-		controlRow(m.cursor == 0, "Brightness", fmt.Sprintf("%d%%", brightness),
-			brightness-ranges.Brightness.Min, rangeSize(ranges.Brightness), lipgloss.Color("#F5D67A")),
-		controlRow(m.cursor == 1, "Temperature", fmt.Sprintf("%d K", temp),
-			temp-ranges.Temp.Min, rangeSize(ranges.Temp), lipgloss.Color(color)),
+		controlRow(m.cursor == 0, "Brightness", m.brightnessBar.View(), fmt.Sprintf("%d%%", brightness)),
+		controlRow(m.cursor == 1, "Temperature", m.tempBar.View(), fmt.Sprintf("%d K", temp)),
 	}
 	section := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#8792BC")).Render("CONTROLS")
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#3B4261")).
@@ -79,55 +77,29 @@ func (m model) View() string {
 	return "\n  " + title + chip + "\n\n  " + bulb + " " + power + current + "\n\n" + box + "\n\n  " + m.statusView() + "\n\n  " + m.footerView() + "\n"
 }
 
-// controlRow renders one slider row as fixed-width segments. When selected,
-// every segment (including the gaps) shares the highlight background, so the
-// highlight is one clean symmetric bar spanning the whole row.
-func controlRow(selected bool, name, valueText string, value, maxValue int, barColor lipgloss.Color) string {
-	tint := func(s lipgloss.Style) lipgloss.Style {
-		if selected {
-			return s.Background(selectedBg)
-		}
-		return s
-	}
+// controlRow renders one slider row as fixed-width segments: a marker chip
+// around the selected row's name, then the animated progress bar, then the
+// value. Every segment keeps its exact width so nothing shifts.
+func controlRow(selected bool, name, bar, valueText string) string {
 	prefix := " "
 	if selected {
 		prefix = "›"
 	}
-	segments := []string{
-		tint(lipgloss.NewStyle().Bold(true).Foreground(selectedFg)).Width(2).Render(prefix),
-		tint(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E8EBFA"))).Width(labelWidth).Render(name),
-		tint(lipgloss.NewStyle()).Render(strings.Repeat(" ", gapWidth)),
-		tint(lipgloss.NewStyle()).Render(slider(value, maxValue, barColor, selected)),
-		tint(lipgloss.NewStyle()).Render(strings.Repeat(" ", gapWidth)),
-		tint(lipgloss.NewStyle().Foreground(lipgloss.Color("#D2D8F4"))).Width(valueWidth).
-			Align(lipgloss.Right).Render(valueText),
-	}
-	return strings.Join(segments, "")
-}
-
-// slider renders a meter as segmented terminal blocks, always exactly
-// meterWidth cells wide. The track uses the full block glyph too (in a dim
-// color) so the whole bar is one solid band — partial-shade glyphs would
-// break up the highlight with a ragged bottom edge.
-func slider(value, maxValue int, color lipgloss.Color, selected bool) string {
-	if maxValue <= 0 {
-		maxValue = 1
-	}
-	pos := value * meterWidth / maxValue
-	if pos < 0 {
-		pos = 0
-	}
-	if pos > meterWidth {
-		pos = meterWidth
-	}
-	filled := lipgloss.NewStyle().Foreground(color)
-	track := lipgloss.NewStyle().Foreground(trackColor)
+	prefixSeg := lipgloss.NewStyle().Width(2).Render(prefix)
+	labelSeg := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E8EBFA")).Width(labelWidth).Render(name)
 	if selected {
-		filled = filled.Background(selectedBg)
-		track = track.Background(selectedBg)
+		chip := lipgloss.NewStyle().Bold(true).Foreground(selectedFg).Background(selectedBg)
+		prefixSeg = chip.Width(2).Render(prefix)
+		labelSeg = chip.Width(labelWidth).Render(name)
 	}
-	return filled.Render(strings.Repeat("█", pos)) +
-		track.Render(strings.Repeat("█", meterWidth-pos))
+	value := lipgloss.NewStyle().Foreground(lipgloss.Color("#D2D8F4")).Width(valueWidth).
+		Align(lipgloss.Right).Render(valueText)
+	if selected {
+		value = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFF6D6")).Width(valueWidth).
+			Align(lipgloss.Right).Render(valueText)
+	}
+	gap := strings.Repeat(" ", gapWidth)
+	return prefixSeg + labelSeg + gap + bar + gap + value
 }
 
 // statusView renders the bottom status line as fixed-width segments: an
@@ -172,7 +144,12 @@ func (m model) viewPicker() string {
 	section := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#8792BC")).Render("SWITCH LIGHT")
 	var rows []string
 	for i, l := range m.found {
-		text := l.Label()
+		if m.renaming && i == m.pick {
+			prompt := lipgloss.NewStyle().Bold(true).Foreground(selectedFg).Background(selectedBg).Width(2).Render("›")
+			rows = append(rows, prompt+" "+m.input.View())
+			continue
+		}
+		text := m.labelFor(l)
 		if identity(l) == identity(m.current) {
 			text += "  (current)"
 		}
@@ -185,7 +162,17 @@ func (m model) viewPicker() string {
 	}
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#3B4261")).
 		Padding(1, boxPaddingX).Width(boxWidth).Render(section + "\n\n" + strings.Join(rows, "\n\n"))
-	return "\n  " + box + "\n\n  " + m.footerView() + "\n"
+	return "\n  " + box + "\n\n  " + m.pickerFooterView() + "\n"
+}
+
+// pickerFooterView renders the switcher's key hints with keycap styling.
+func (m model) pickerFooterView() string {
+	key := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F5D67A"))
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#737C9E"))
+	return key.Render("↑↓") + dim.Render(" choose  ") +
+		key.Render("enter") + dim.Render(" switch  ") +
+		key.Render("n") + dim.Render(" rename  ") +
+		key.Render("esc") + dim.Render(" cancel")
 }
 
 func rangeSize(r light.Range) int {

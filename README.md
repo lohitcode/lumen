@@ -32,7 +32,9 @@ Ships with a **WiZ driver** out of the box, but the light interface is small and
 - **Automatic discovery** — finds lights on your network via broadcast; no configuration needed
 - **Real names** — shows each light's friendly device name, not its IP
 - **Live state** — power, brightness, and white temperature refresh every two seconds
+- **Silky sliders** — native [bubbles](https://github.com/charmbracelet/bubbles) progress bars animated on springs at 60 fps
 - **Multi-light switching** — press `s` to re-scan and jump between lights instantly
+- **Inline aliases** — rename any light right in the switcher; names persist per light
 - **Remembers you** — reopens the light you used last time automatically
 - **Driver architecture** — a small Go interface per protocol; the UI never talks to hardware directly
 - **Fully local** — control stays on your LAN; the cloud is never contacted
@@ -77,6 +79,7 @@ Lights show their friendly device name when the driver can read one. WiZ firmwar
 | `↑` `↓` / `k` `j` | Select brightness or temperature |
 | `←` `→` / `h` `l` | Adjust the selected value (±5% brightness, ±100 K) |
 | `s` | Scan the network and switch to another light |
+| `n` (in switcher) | Rename the highlighted light inline |
 | `q` / `esc` / `ctrl+c` | Quit |
 
 ### Session persistence

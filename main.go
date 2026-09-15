@@ -29,66 +29,47 @@ func main() {
 	name := flag.String("name", "", "display name for the light; stored locally and on WiZ bulbs that accept names")
 	flag.Parse()
 
-	selected, err := selectLight(*host, *driverName)
+	labels := config.LoadNames()
+	selected, err := selectLight(*host, *driverName, labels)
 	if err != nil {
 		fatal(err)
 	}
 
-	saved, _ := config.LoadLast()
-	label := *name
-	if label == "" && saved.Driver == selected.Driver() && saved.Address == selected.Address() {
-		label = saved.Name
-	}
-	if label != "" {
+	if *name != "" {
+		labels[config.NamesKey(selected.Driver(), selected.Address())] = *name
 		if setter, ok := selected.(interface{ SetName(string) error }); ok {
-			if err := setter.SetName(label); err != nil {
+			if err := setter.SetName(*name); err != nil {
 				// Firmware that rejects local names is fine; the label still
 				// applies in the UI and persists in the config file.
 				fmt.Fprintln(os.Stderr, "lumen: device kept its current name:", err)
 			}
 		}
-		selected = namedLight{Light: selected, label: label}
+		if err := config.SaveName(selected.Driver(), selected.Address(), *name); err != nil {
+			fmt.Fprintln(os.Stderr, "lumen: could not save name:", err)
+		}
 	}
 
 	if err := config.SaveLast(config.LastLight{
 		Driver:  selected.Driver(),
 		Address: selected.Address(),
-		Name:    label,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, "lumen: could not save last light:", err)
 	}
-	if err := ui.Run(selected, func(l light.Light) {
-		_ = config.SaveLast(config.LastLight{
-			Driver:  l.Driver(),
-			Address: l.Address(),
-			Name:    overrideLabel(l),
-		})
+	if err := ui.Run(selected, labels, ui.Hooks{
+		OnSwitch: func(l light.Light) {
+			_ = config.SaveLast(config.LastLight{Driver: l.Driver(), Address: l.Address()})
+		},
+		OnRename: func(l light.Light, name string) {
+			_ = config.SaveName(l.Driver(), l.Address(), name)
+		},
 	}); err != nil {
 		fatal(err)
 	}
 }
 
-// namedLight overrides only the display label of a light and delegates
-// everything else.
-type namedLight struct {
-	light.Light
-	label string
-}
-
-func (n namedLight) Label() string { return n.label }
-
-// overrideLabel reports a light's user-chosen label, or "" when the light
-// only has its device-provided label.
-func overrideLabel(l light.Light) string {
-	if n, ok := l.(namedLight); ok {
-		return n.label
-	}
-	return ""
-}
-
 // selectLight picks the light to open: an explicit address, the light saved
 // from the previous session, or discovery.
-func selectLight(host, driverName string) (light.Light, error) {
+func selectLight(host, driverName string, labels map[string]string) (light.Light, error) {
 	if host != "" {
 		d, err := light.Lookup(driverName)
 		if err != nil {
@@ -115,7 +96,11 @@ func selectLight(host, driverName string) (light.Light, error) {
 	}
 
 	for i, l := range found {
-		fmt.Printf("%d. %s\n", i+1, l.Label())
+		name := l.Label()
+		if alias, ok := labels[config.NamesKey(l.Driver(), l.Address())]; ok && alias != "" {
+			name = alias
+		}
+		fmt.Printf("%d. %s\n", i+1, name)
 	}
 	choice, err := askNumber("Choose a light", 1, len(found))
 	if err != nil {

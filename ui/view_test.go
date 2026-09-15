@@ -42,9 +42,12 @@ func TestViewLineWidthsAreStable(t *testing.T) {
 		Temp:       light.Range{Min: 2700, Max: 6500},
 	}
 	base := model{
-		current: fakeLight{ranges},
-		status:  light.State{On: true, Brightness: 70, Temp: 5000},
-		message: "Connected",
+		current:       fakeLight{ranges},
+		status:        light.State{On: true, Brightness: 70, Temp: 5000},
+		message:       "Connected",
+		brightnessBar: newBrightnessBar(),
+		tempBar:       newTempBar(),
+		labels:        map[string]string{},
 	}
 
 	states := map[string]model{
@@ -82,23 +85,29 @@ func withModel(m model, mutate func(*model)) model {
 }
 
 // TestSelectedRowHighlightCoversEveryCell walks the raw ANSI output of a
-// selected row and verifies every visible cell carries the highlight
-// background — nested style resets previously cut the highlight short after
-// the label, leaving an asymmetric blob.
+// selected row and verifies the name chip carries the highlight background
+// on every one of its cells while the bar area and value carry none — the
+// animated bubbles/progress bar owns its own colors there. Nested style
+// resets previously cut the highlight short after the label, leaving an
+// asymmetric blob.
 func TestSelectedRowHighlightCoversEveryCell(t *testing.T) {
-	row := controlRow(true, "Brightness", "45%", 35, 90, lipgloss.Color("#F5D67A"))
+	row := controlRow(true, "Brightness", strings.Repeat("█", meterWidth), "45%")
 	cells := cellBackgrounds(row)
 	if len(cells) != rowWidth {
 		t.Fatalf("selected row renders %d cells, want %d", len(cells), rowWidth)
 	}
 	const want = "48;2;39;44;67" // selectedBg #272C43
+	chip := 2 + labelWidth       // marker + name carry the highlight
 	for i, bg := range cells {
-		if bg != want {
+		if i < chip && bg != want {
 			t.Fatalf("selected row cell %d is missing the highlight background (found %q)", i+1, bg)
+		}
+		if i >= chip && bg != "" {
+			t.Fatalf("selected row cell %d unexpectedly has a background (found %q)", i+1, bg)
 		}
 	}
 
-	idle := controlRow(false, "Brightness", "45%", 35, 90, lipgloss.Color("#F5D67A"))
+	idle := controlRow(false, "Brightness", strings.Repeat("█", meterWidth), "45%")
 	for i, bg := range cellBackgrounds(idle) {
 		if bg != "" {
 			t.Fatalf("unselected row cell %d unexpectedly has background %q", i+1, bg)
