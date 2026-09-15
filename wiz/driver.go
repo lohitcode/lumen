@@ -7,11 +7,20 @@ import (
 	"os"
 	"sort"
 	"time"
+
+	"github.com/lohitcode/study-light/light"
 )
 
-// Discover finds WiZ lights on the local network by broadcasting getPilot to
-// every interface's broadcast address and collecting replies for two seconds.
-func Discover() ([]Device, error) {
+func init() { light.Register(Driver{}) }
+
+// Driver connects to WiZ lights over their local UDP protocol.
+type Driver struct{}
+
+func (Driver) Name() string { return "wiz" }
+
+// Discover broadcasts getPilot to every network's broadcast address and
+// collects replies for up to timeout.
+func (Driver) Discover(timeout time.Duration) ([]light.Light, error) {
 	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
 	if err != nil {
 		return nil, err
@@ -26,9 +35,10 @@ func Discover() ([]Device, error) {
 		_, _ = conn.WriteToUDP(payload, &net.UDPAddr{IP: address, Port: wizPort})
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
-	found := map[string]Device{}
+	deadline := time.Now().Add(timeout)
+	found := map[string]struct{}{}
 	buffer := make([]byte, 4096)
+	var lights []light.Light
 	for {
 		if err := conn.SetReadDeadline(deadline); err != nil {
 			return nil, err
@@ -40,21 +50,29 @@ func Discover() ([]Device, error) {
 			}
 			return nil, err
 		}
-		var reply Response
+		var reply response
 		if json.Unmarshal(buffer[:n], &reply) == nil && reply.Result != nil {
-			found[peer.IP.String()] = Device{Host: peer.IP.String(), Info: reply}
+			host := peer.IP.String()
+			if _, seen := found[host]; !seen {
+				found[host] = struct{}{}
+				lights = append(lights, Light{host: host})
+			}
 		}
 	}
+	if len(lights) == 0 {
+		return nil, errors.New("no WiZ lights replied")
+	}
+	sort.Slice(lights, func(i, j int) bool { return lights[i].Address() < lights[j].Address() })
+	return lights, nil
+}
 
-	if len(found) == 0 {
-		return nil, errors.New("no WiZ lights replied; confirm this machine and the light are on the same network and local communication is enabled in the WiZ app")
+// Connect verifies the light at address is reachable and returns it.
+func (Driver) Connect(address string) (light.Light, error) {
+	l := Light{host: address}
+	if _, err := l.State(); err != nil {
+		return nil, err
 	}
-	devices := make([]Device, 0, len(found))
-	for _, d := range found {
-		devices = append(devices, d)
-	}
-	sort.Slice(devices, func(i, j int) bool { return devices[i].Host < devices[j].Host })
-	return devices, nil
+	return l, nil
 }
 
 func broadcastAddresses() []net.IP {

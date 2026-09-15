@@ -14,7 +14,7 @@ func register(host string) error {
 	if err != nil {
 		return err
 	}
-	reply, err := Call(host, "registration", map[string]any{
+	reply, err := call(host, "registration", map[string]any{
 		"phoneIp":  ip,
 		"phoneMac": mac,
 		"register": true,
