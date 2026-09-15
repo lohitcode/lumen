@@ -105,8 +105,10 @@ func controlRow(selected bool, name, valueText string, value, maxValue int, barC
 	return strings.Join(segments, "")
 }
 
-// slider renders a meter as segmented terminal blocks (██░░), always
-// exactly meterWidth cells wide.
+// slider renders a meter as segmented terminal blocks, always exactly
+// meterWidth cells wide. The track uses the full block glyph too (in a dim
+// color) so the whole bar is one solid band — partial-shade glyphs would
+// break up the highlight with a ragged bottom edge.
 func slider(value, maxValue int, color lipgloss.Color, selected bool) string {
 	if maxValue <= 0 {
 		maxValue = 1
@@ -125,7 +127,7 @@ func slider(value, maxValue int, color lipgloss.Color, selected bool) string {
 		track = track.Background(selectedBg)
 	}
 	return filled.Render(strings.Repeat("█", pos)) +
-		track.Render(strings.Repeat("░", meterWidth-pos))
+		track.Render(strings.Repeat("█", meterWidth-pos))
 }
 
 // statusView renders the bottom status line as fixed-width segments: an
