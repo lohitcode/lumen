@@ -16,9 +16,9 @@ Ships with a **WiZ driver** out of the box, but the light interface is small and
   │                                                          │
   │  CONTROLS                                                │
   │                                                          │
-  │  ›  Brightness      ━━━━━━━━━━●━━━━━━━━━━━━━━       70%  │
+  │  ›  Brightness      ████████░░░░░░░░░░░░░░░░░       70%  │
   │                                                          │
-  │     Temperature     ━━━━━━━━━━━━━━━●━━━━━━━━━━     5000 K │
+  │     Temperature     ██████████████░░░░░░░░░░░      5000 K │
   │                                                          │
   ╰──────────────────────────────────────────────────────────╯
 

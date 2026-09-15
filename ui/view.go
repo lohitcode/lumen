@@ -105,30 +105,27 @@ func controlRow(selected bool, name, valueText string, value, maxValue int, barC
 	return strings.Join(segments, "")
 }
 
-// slider renders a meter as a filled bar with a round thumb at the current
-// position, always exactly meterWidth cells wide.
+// slider renders a meter as segmented terminal blocks (██░░), always
+// exactly meterWidth cells wide.
 func slider(value, maxValue int, color lipgloss.Color, selected bool) string {
 	if maxValue <= 0 {
 		maxValue = 1
 	}
-	pos := value * (meterWidth - 1) / maxValue
+	pos := value * meterWidth / maxValue
 	if pos < 0 {
 		pos = 0
 	}
-	if pos > meterWidth-1 {
-		pos = meterWidth - 1
+	if pos > meterWidth {
+		pos = meterWidth
 	}
 	filled := lipgloss.NewStyle().Foreground(color)
 	track := lipgloss.NewStyle().Foreground(trackColor)
-	knob := lipgloss.NewStyle().Foreground(color).Bold(true)
 	if selected {
 		filled = filled.Background(selectedBg)
 		track = track.Background(selectedBg)
-		knob = knob.Background(selectedBg)
 	}
-	return filled.Render(strings.Repeat("━", pos)) +
-		knob.Render("●") +
-		track.Render(strings.Repeat("━", meterWidth-1-pos))
+	return filled.Render(strings.Repeat("█", pos)) +
+		track.Render(strings.Repeat("░", meterWidth-pos))
 }
 
 // statusView renders the bottom status line as fixed-width segments: an
