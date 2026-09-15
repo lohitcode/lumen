@@ -1,0 +1,10 @@
+# Compiled binaries
+/study-light
+/studylight
+*.exe
+
+# OS artifacts
+.DS_Store
+
+# Local agent/session tooling
+.zcode/
