@@ -1,6 +1,10 @@
 // Package ui renders the interactive terminal interface for lights: a live
 // dashboard with a two-second refresh, keyboard-driven power, brightness, and
 // white-temperature controls, and a switcher for jumping between lights.
+//
+// The layout is built entirely from fixed-width segments so that state
+// changes never shift neighboring text — the view stays still and only
+// values change.
 package ui
 
 import (
@@ -22,7 +26,18 @@ func Run(l light.Light, onSwitch func(light.Light)) error {
 	return err
 }
 
-const discoverTimeout = 2 * time.Second
+const (
+	discoverTimeout = 2 * time.Second
+	refreshEvery    = 2 * time.Second
+	spinnerEvery    = 500 * time.Millisecond
+	// A single missed UDP read is unremarkable; only report an error once
+	// several reads in a row have failed, so the status line doesn't flash.
+	maxReadFailures = 2
+)
+
+const connectingMessage = "Connecting…"
+
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 type mode int
 
@@ -42,6 +57,7 @@ type lightsMsg struct {
 	err    error
 }
 type tickMsg time.Time
+type spinnerTickMsg time.Time
 
 type model struct {
 	current  light.Light
@@ -53,25 +69,33 @@ type model struct {
 	cursor   int
 	message  string
 	err      error
+	failures int
+	frame    int
 	busy     bool
 	quitting bool
 }
 
 func newModel(l light.Light, onSwitch func(light.Light)) model {
-	m := model{current: l, onSwitch: onSwitch, message: "Connecting…"}
+	m := model{current: l, onSwitch: onSwitch, message: connectingMessage}
 	// Seed with the real state when it is already known so the first paint
 	// never flashes wrong values; the refresh loop takes over from there.
 	if state, err := l.State(); err == nil {
 		m.status = state
-		m.message = "Live status · refreshed just now"
+		m.message = "Connected"
 	}
 	return m
 }
 
-func (m model) Init() tea.Cmd { return tea.Batch(m.refresh(), nextTick()) }
+func (m model) Init() tea.Cmd {
+	return tea.Batch(m.refresh(), nextTick(), nextSpinner())
+}
 
 func nextTick() tea.Cmd {
-	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
+	return tea.Tick(refreshEvery, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+func nextSpinner() tea.Cmd {
+	return tea.Tick(spinnerEvery, func(t time.Time) tea.Msg { return spinnerTickMsg(t) })
 }
 
 func (m model) refresh() tea.Cmd {
@@ -155,26 +179,42 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "right", "l":
 			return m.adjust(5, 100)
 		}
+	case spinnerTickMsg:
+		// Only animate while there is something to wait for; a steady dot
+		// reads calmer when everything is already live.
+		if m.busy || m.mode == modeSearching {
+			m.frame = (m.frame + 1) % len(spinnerFrames)
+		}
+		return m, nextSpinner()
 	case statusMsg:
 		m.busy = false
-		m.err = msg.err
-		if msg.err == nil {
-			m.status = msg.state
-			m.message = "Live status · refreshed just now"
+		if msg.err != nil {
+			m.failures++
+			if m.failures >= maxReadFailures {
+				m.err = msg.err
+			}
+			return m, nil
+		}
+		m.failures = 0
+		m.err = nil
+		m.status = msg.state
+		if m.message == connectingMessage {
+			m.message = "Connected"
 		}
 		return m, nil
 	case actionMsg:
 		m.busy = false
-		m.err = msg.err
-		if m.err == nil {
-			m.message = "Applied to " + m.current.Label()
-			return m, m.refresh()
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
 		}
+		m.err = nil
+		m.message = "Applied to " + m.current.Label()
+		return m, m.refresh()
 	case lightsMsg:
 		if m.mode != modeSearching {
 			return m, nil // a search that was cancelled mid-flight
 		}
-		m.busy = false
 		if msg.err != nil {
 			m.mode = modeNormal
 			m.err = msg.err
