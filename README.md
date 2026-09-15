@@ -1,6 +1,6 @@
-# Study Light
+# lumen
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/lohitcode/study-light.svg)](https://pkg.go.dev/github.com/lohitcode/study-light)
+[![Go Reference](https://pkg.go.dev/badge/github.com/lohitcode/lumen.svg)](https://pkg.go.dev/github.com/lohitcode/lumen)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A keyboard-driven terminal UI for your smart lights — fully local, no cloud, no account, one static binary.
@@ -8,21 +8,21 @@ A keyboard-driven terminal UI for your smart lights — fully local, no cloud, n
 Ships with a **WiZ driver** out of the box, but the light interface is small and generic: if your lamp speaks some other protocol (Hue, TP-Link Kasa, ESPHome, MQTT, …), you can add it with one short driver and the whole UI — discovery, switching, live state, persistence — just works.
 
 ```
-  STUDY LIGHT  WiZ @ 192.168.1.42
+  LUMEN  Study Lamp
 
-  ● ON  70% • 5000 K
+  ● ON  45% • 4900 K
 
   ╭──────────────────────────────────────────────────────────╮
   │                                                          │
   │  CONTROLS                                                │
   │                                                          │
-  │  ›  Brightness      ████████░░░░░░░░░░░░░░░░░       70%  │
+  │  ›  Brightness      ████████░░░░░░░░░░░░░░░░░       45%  │
   │                                                          │
-  │     Temperature     ██████████████░░░░░░░░░░░      5000 K │
+  │     Temperature     ██████████████░░░░░░░░░░░     4900 K │
   │                                                          │
   ╰──────────────────────────────────────────────────────────╯
 
-  ● live  Applied to WiZ @ 192.168.1.42
+  ● live
 
   ↑↓ select  ←→ adjust  o power  s lights  q quit
 ```
@@ -30,6 +30,7 @@ Ships with a **WiZ driver** out of the box, but the light interface is small and
 ## Features
 
 - **Automatic discovery** — finds lights on your network via broadcast; no configuration needed
+- **Real names** — shows each light's friendly device name, not its IP
 - **Live state** — power, brightness, and white temperature refresh every two seconds
 - **Multi-light switching** — press `s` to re-scan and jump between lights instantly
 - **Remembers you** — reopens the light you used last time automatically
@@ -46,7 +47,7 @@ Ships with a **WiZ driver** out of the box, but the light interface is small and
 ## Install
 
 ```sh
-go install github.com/lohitcode/study-light@latest
+go install github.com/lohitcode/lumen@latest
 ```
 
 Make sure `$(go env GOPATH)/bin` is in your `PATH`.
@@ -54,18 +55,21 @@ Make sure `$(go env GOPATH)/bin` is in your `PATH`.
 Or build from source:
 
 ```sh
-git clone https://github.com/lohitcode/study-light
-cd study-light
+git clone https://github.com/lohitcode/lumen
+cd lumen
 go install .
 ```
 
 ## Usage
 
 ```sh
-study-light                              # reopen your last light, or discover
-study-light --host 192.168.1.42          # target a specific light
-study-light --host hue.local --driver hue  # target a light through a specific driver
+lumen                              # reopen your last light, or discover
+lumen --host 192.168.1.42          # target a specific light
+lumen --host hue.local --driver hue  # target a light through a specific driver
+lumen --name "Reading Lamp"        # name a light (shown instead of its address)
 ```
+
+Lights show their friendly device name when the driver can read one. WiZ firmware that keeps names cloud-side can be named locally instead — the `--name` label is saved per light and shown from then on.
 
 | Key | Action |
 | --- | --- |
@@ -77,7 +81,7 @@ study-light --host hue.local --driver hue  # target a light through a specific d
 
 ### Session persistence
 
-The light you open is saved to your user config directory (`~/Library/Application Support/study-light/config.json` on macOS, `~/.config/study-light/config.json` on Linux) and reopened automatically next launch. If that light is unreachable, Study Light falls back to discovery. Switching lights with `s` updates the saved choice.
+The light you open is saved to your user config directory (`~/Library/Application Support/lumen/config.json` on macOS, `~/.config/lumen/config.json` on Linux) and reopened automatically next launch. If that light is unreachable, lumen falls back to discovery. Switching lights with `s` updates the saved choice.
 
 ## Supporting your own lights
 
@@ -112,7 +116,7 @@ That's it — discovery, the `s` switcher, last-light persistence, and the dashb
 
 ## How the WiZ driver works
 
-WiZ lights listen on UDP port 38899 for small JSON commands. The driver broadcasts `getPilot` to discover bulbs, reads state with `getPilot`, writes changes with `setPilot` (falling back to the legacy `setState` on older firmware), and performs the `registration` handshake before writes. Everything stays on your LAN.
+WiZ lights listen on UDP port 38899 for small JSON commands. The driver broadcasts `getPilot` to discover bulbs, reads state with `getPilot`, reads each bulb's friendly name with `getSystemConfig`, writes changes with `setPilot` (falling back to the legacy `setState` on older firmware), and performs the `registration` handshake before writes. Everything stays on your LAN.
 
 ## Project layout
 
@@ -121,7 +125,7 @@ main.go          entry point: flags, last-light reconnect, discovery picker
 light/light.go   the generic Light and Driver interfaces + driver registry
 config/config.go session persistence (last light) in your user config dir
 ui/tui.go        Bubble Tea model: keys, refresh loop, light switcher
-ui/view.go       Lipgloss rendering: dashboard, picker, meters, colors
+ui/view.go       Lipgloss rendering: dashboard, picker, sliders, colors
 wiz/             built-in WiZ driver (client, discovery, registration, light)
 ```
 

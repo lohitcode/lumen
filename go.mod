@@ -1,4 +1,4 @@
-module github.com/lohitcode/study-light
+module github.com/lohitcode/lumen
 
 go 1.26
 

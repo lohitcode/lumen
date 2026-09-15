@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 )
 
-// LastLight identifies the light from the previous session.
+// LastLight identifies the light from the previous session, plus any
+// display name the user gave it.
 type LastLight struct {
 	Driver  string `json:"driver"`
 	Address string `json:"address"`
+	Name    string `json:"name,omitempty"`
 }
 
 type file struct {
@@ -33,11 +35,11 @@ func LoadLast() (LastLight, bool) {
 }
 
 // SaveLast records the light to reopen on the next launch.
-func SaveLast(driver, address string) error {
-	if driver == "" || address == "" {
+func SaveLast(l LastLight) error {
+	if l.Driver == "" || l.Address == "" {
 		return errors.New("refusing to save an incomplete light reference")
 	}
-	data, err := json.MarshalIndent(file{Last: &LastLight{Driver: driver, Address: address}}, "", "  ")
+	data, err := json.MarshalIndent(file{Last: &l}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -52,5 +54,5 @@ func path() string {
 	if err != nil {
 		base = "."
 	}
-	return filepath.Join(base, "study-light", "config.json")
+	return filepath.Join(base, "lumen", "config.json")
 }

@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/lohitcode/study-light/light"
+	"github.com/lohitcode/lumen/light"
 )
 
 func init() { light.Register(Driver{}) }
@@ -55,7 +55,7 @@ func (Driver) Discover(timeout time.Duration) ([]light.Light, error) {
 			host := peer.IP.String()
 			if _, seen := found[host]; !seen {
 				found[host] = struct{}{}
-				lights = append(lights, Light{host: host})
+				lights = append(lights, Light{host: host, name: deviceName(host)})
 			}
 		}
 	}
@@ -72,6 +72,7 @@ func (Driver) Connect(address string) (light.Light, error) {
 	if _, err := l.State(); err != nil {
 		return nil, err
 	}
+	l.name = deviceName(address)
 	return l, nil
 }
 

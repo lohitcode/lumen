@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
-	"github.com/lohitcode/study-light/light"
+	"github.com/lohitcode/lumen/light"
 )
 
 // Tests run without a TTY, where lipgloss would strip all color output;

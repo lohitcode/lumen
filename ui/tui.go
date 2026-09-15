@@ -12,7 +12,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/lohitcode/study-light/light"
+	"github.com/lohitcode/lumen/light"
 )
 
 // Run starts the terminal UI for the given light and blocks until quit.
@@ -81,7 +81,7 @@ func newModel(l light.Light, onSwitch func(light.Light)) model {
 	// never flashes wrong values; the refresh loop takes over from there.
 	if state, err := l.State(); err == nil {
 		m.status = state
-		m.message = "Connected"
+		m.message = ""
 	}
 	return m
 }
@@ -123,7 +123,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case modeSearching:
 			if msg.String() == "esc" {
 				m.mode = modeNormal
-				m.message = "Search cancelled"
+				m.message = ""
 			}
 			return m, nil
 		case modePicking:
@@ -143,8 +143,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				chosen := m.found[m.pick]
 				m.mode = modeNormal
 				if identity(chosen) != identity(m.current) {
+					// The header updates to the new light's name — that is
+					// the feedback, so the status line stays clean.
 					m.current = chosen
-					m.message = "Switched to " + chosen.Label()
+					m.message = ""
 					if m.onSwitch != nil {
 						m.onSwitch(chosen)
 					}
@@ -160,7 +162,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "s":
 			m.mode = modeSearching
-			m.message = "Searching for lights…"
+			m.message = ""
 			return m, m.discover()
 		case "o", " ":
 			m.busy = true
@@ -198,9 +200,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.failures = 0
 		m.err = nil
 		m.status = msg.state
-		if m.message == connectingMessage {
-			m.message = "Connected"
-		}
+		m.message = ""
 		return m, nil
 	case actionMsg:
 		m.busy = false
@@ -209,7 +209,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.err = nil
-		m.message = "Applied to " + m.current.Label()
+		m.message = ""
 		return m, m.refresh()
 	case lightsMsg:
 		if m.mode != modeSearching {

@@ -6,7 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/lohitcode/study-light/light"
+	"github.com/lohitcode/lumen/light"
 )
 
 // Layout geometry. Everything the view renders lives inside these fixed
@@ -34,7 +34,7 @@ var (
 
 func (m model) View() string {
 	if m.quitting {
-		return "\n  Study Light disconnected.\n\n"
+		return "\n  Lumen disconnected.\n\n"
 	}
 	if m.mode == modePicking {
 		return m.viewPicker()
@@ -51,7 +51,7 @@ func (m model) View() string {
 	ranges := m.current.Ranges()
 	color := temperatureColor(temp, ranges.Temp)
 
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFF1C7")).Render("STUDY LIGHT")
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFF1C7")).Render("LUMEN")
 	chip := lipgloss.NewStyle().Foreground(lipgloss.Color("#8792BC")).Render("  " + m.current.Label())
 
 	// Fixed-width power badge: ON and OFF occupy the same space, so the

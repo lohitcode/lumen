@@ -3,12 +3,13 @@ package wiz
 import (
 	"encoding/json"
 
-	"github.com/lohitcode/study-light/light"
+	"github.com/lohitcode/lumen/light"
 )
 
 // Light is a single WiZ bulb on the local network.
 type Light struct {
 	host string
+	name string
 }
 
 var wizRanges = light.Ranges{
@@ -18,7 +19,15 @@ var wizRanges = light.Ranges{
 
 func (l Light) Driver() string  { return "wiz" }
 func (l Light) Address() string { return l.host }
-func (l Light) Label() string   { return "WiZ @ " + l.host }
+
+// Label shows the bulb's friendly name from the WiZ app, falling back to
+// the address for unnamed or unreadable bulbs.
+func (l Light) Label() string {
+	if l.name != "" {
+		return l.name
+	}
+	return "WiZ @ " + l.host
+}
 func (l Light) Ranges() light.Ranges {
 	return wizRanges
 }
@@ -57,6 +66,23 @@ func (l Light) SetTemp(kelvin int) error {
 // apply sends one write and surfaces transport errors and bulb rejections.
 func (l Light) apply(params map[string]any) error {
 	reply, err := setLight(l.host, params)
+	if err != nil {
+		return err
+	}
+	if reply.Error != nil {
+		return reply.Error
+	}
+	return nil
+}
+
+// SetName stores a friendly name on the bulb itself. Some firmware versions
+// reject this; callers should treat that as non-fatal and keep their own
+// display-name override.
+func (l Light) SetName(name string) error {
+	if err := register(l.host); err != nil {
+		return err
+	}
+	reply, err := call(l.host, "setSystemConfig", map[string]any{"friendlyName": name})
 	if err != nil {
 		return err
 	}

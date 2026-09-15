@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -37,6 +38,17 @@ func (e *rpcError) Error() string { return fmt.Sprintf("%s (%d)", e.Message, e.C
 // getState fetches the light's current power, brightness, and temperature.
 func getState(host string) (response, error) {
 	return call(host, "getPilot", nil)
+}
+
+// deviceName fetches the friendly name the user set for the bulb in the
+// WiZ app, or an empty string when it can't be read.
+func deviceName(host string) string {
+	reply, err := call(host, "getSystemConfig", nil)
+	if err != nil || reply.Error != nil {
+		return ""
+	}
+	name, _ := reply.Result["friendlyName"].(string)
+	return strings.TrimSpace(name)
 }
 
 // setLight applies params to the light, registering first as the bulbs
