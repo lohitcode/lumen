@@ -10,10 +10,26 @@ import (
 )
 
 // Layout geometry. Everything the view renders lives inside these fixed
-// widths, so no state change can push neighboring text around.
+// widths, so no state change can shift neighboring text.
 const (
-	contentWidth = 66 // status line and box width, including the indent
+	contentWidth = 66 // status line width, including the indent
+	boxWidth     = 64 // controls box outer width
+	boxPaddingX  = 2  // box horizontal padding
+	rowWidth     = boxWidth - 2*boxPaddingX
+	labelWidth   = 14
+	meterWidth   = 25
+	valueWidth   = 13
+	gapWidth     = 3
 	messageLimit = 44 // characters of status message before truncation
+)
+
+// Selection colors. Every fragment of a selected row carries the background
+// itself — nesting styled strings inside one background-styled render does
+// not work: the inner styles' reset sequences would cut the highlight short.
+var (
+	selectedBg = lipgloss.Color("#272C43")
+	selectedFg = lipgloss.Color("#FFF6D6")
+	trackColor = lipgloss.Color("#343B56")
 )
 
 func (m model) View() string {
@@ -51,16 +67,68 @@ func (m model) View() string {
 	current := lipgloss.NewStyle().Foreground(lipgloss.Color("#D2D8F4")).Width(14).Render(
 		fmt.Sprintf("%d%% • %d K", brightness, temp))
 
-	label := lipgloss.NewStyle().Width(18).Bold(true).Foreground(lipgloss.Color("#E8EBFA"))
-	value := lipgloss.NewStyle().Width(8).Align(lipgloss.Right).Foreground(lipgloss.Color("#D2D8F4"))
 	rows := []string{
-		controlRow(m.cursor == 0, label.Render("Brightness"), meter(brightness-ranges.Brightness.Min, rangeSize(ranges.Brightness), lipgloss.Color("#F5D67A")), value.Render(fmt.Sprintf("%d%%", brightness))),
-		controlRow(m.cursor == 1, label.Render("Temperature"), meter(temp-ranges.Temp.Min, rangeSize(ranges.Temp), lipgloss.Color(color)), value.Render(fmt.Sprintf("%d K", temp))),
+		controlRow(m.cursor == 0, "Brightness", fmt.Sprintf("%d%%", brightness),
+			brightness-ranges.Brightness.Min, rangeSize(ranges.Brightness), lipgloss.Color("#F5D67A")),
+		controlRow(m.cursor == 1, "Temperature", fmt.Sprintf("%d K", temp),
+			temp-ranges.Temp.Min, rangeSize(ranges.Temp), lipgloss.Color(color)),
 	}
 	section := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#8792BC")).Render("CONTROLS")
-	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#3B4261")).Padding(1, 2).Width(64).Render(section + "\n\n" + strings.Join(rows, "\n\n"))
-	footer := lipgloss.NewStyle().Foreground(lipgloss.Color("#737C9E")).Render("↑↓ select  ←→ adjust  o toggle power  s switch light  q quit")
-	return "\n  " + title + chip + "\n\n  " + bulb + " " + power + current + "\n\n" + box + "\n\n  " + m.statusView() + "\n\n  " + footer + "\n"
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#3B4261")).
+		Padding(1, boxPaddingX).Width(boxWidth).Render(section + "\n\n" + strings.Join(rows, "\n\n"))
+	return "\n  " + title + chip + "\n\n  " + bulb + " " + power + current + "\n\n" + box + "\n\n  " + m.statusView() + "\n\n  " + m.footerView() + "\n"
+}
+
+// controlRow renders one slider row as fixed-width segments. When selected,
+// every segment (including the gaps) shares the highlight background, so the
+// highlight is one clean symmetric bar spanning the whole row.
+func controlRow(selected bool, name, valueText string, value, maxValue int, barColor lipgloss.Color) string {
+	tint := func(s lipgloss.Style) lipgloss.Style {
+		if selected {
+			return s.Background(selectedBg)
+		}
+		return s
+	}
+	prefix := " "
+	if selected {
+		prefix = "›"
+	}
+	segments := []string{
+		tint(lipgloss.NewStyle().Bold(true).Foreground(selectedFg)).Width(2).Render(prefix),
+		tint(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E8EBFA"))).Width(labelWidth).Render(name),
+		tint(lipgloss.NewStyle()).Render(strings.Repeat(" ", gapWidth)),
+		tint(lipgloss.NewStyle()).Render(slider(value, maxValue, barColor, selected)),
+		tint(lipgloss.NewStyle()).Render(strings.Repeat(" ", gapWidth)),
+		tint(lipgloss.NewStyle().Foreground(lipgloss.Color("#D2D8F4"))).Width(valueWidth).
+			Align(lipgloss.Right).Render(valueText),
+	}
+	return strings.Join(segments, "")
+}
+
+// slider renders a meter as a filled bar with a round thumb at the current
+// position, always exactly meterWidth cells wide.
+func slider(value, maxValue int, color lipgloss.Color, selected bool) string {
+	if maxValue <= 0 {
+		maxValue = 1
+	}
+	pos := value * (meterWidth - 1) / maxValue
+	if pos < 0 {
+		pos = 0
+	}
+	if pos > meterWidth-1 {
+		pos = meterWidth - 1
+	}
+	filled := lipgloss.NewStyle().Foreground(color)
+	track := lipgloss.NewStyle().Foreground(trackColor)
+	knob := lipgloss.NewStyle().Foreground(color).Bold(true)
+	if selected {
+		filled = filled.Background(selectedBg)
+		track = track.Background(selectedBg)
+		knob = knob.Background(selectedBg)
+	}
+	return filled.Render(strings.Repeat("━", pos)) +
+		knob.Render("●") +
+		track.Render(strings.Repeat("━", meterWidth-1-pos))
 }
 
 // statusView renders the bottom status line as fixed-width segments: an
@@ -90,6 +158,17 @@ func (m model) statusView() string {
 		indicator + lipgloss.NewStyle().Foreground(lipgloss.Color(textColor)).Render(truncate(text, messageLimit)))
 }
 
+// footerView renders the key hints with keycap-style colored keys.
+func (m model) footerView() string {
+	key := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F5D67A"))
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#737C9E"))
+	return key.Render("↑↓") + dim.Render(" select  ") +
+		key.Render("←→") + dim.Render(" adjust  ") +
+		key.Render("o") + dim.Render(" power  ") +
+		key.Render("s") + dim.Render(" lights  ") +
+		key.Render("q") + dim.Render(" quit")
+}
+
 func (m model) viewPicker() string {
 	section := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#8792BC")).Render("SWITCH LIGHT")
 	var rows []string
@@ -99,34 +178,15 @@ func (m model) viewPicker() string {
 			text += "  (current)"
 		}
 		if i == m.pick {
-			rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color("#FFF6D6")).Background(lipgloss.Color("#272C43")).Width(58).Render("› "+text))
+			rows = append(rows, lipgloss.NewStyle().Foreground(selectedFg).Background(selectedBg).
+				Width(rowWidth).Render("› "+text))
 			continue
 		}
-		rows = append(rows, lipgloss.NewStyle().Width(58).Render("  "+text))
+		rows = append(rows, lipgloss.NewStyle().Width(rowWidth).Render("  "+text))
 	}
-	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#3B4261")).Padding(1, 2).Width(64).Render(section + "\n\n" + strings.Join(rows, "\n\n"))
-	footer := lipgloss.NewStyle().Foreground(lipgloss.Color("#737C9E")).Render("↑↓ choose  enter switch  esc cancel")
-	return "\n  " + box + "\n\n  " + footer + "\n"
-}
-
-func controlRow(selected bool, label, bar, value string) string {
-	row := "  " + label + "  " + bar + "  " + value
-	if selected {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#FFF6D6")).Background(lipgloss.Color("#272C43")).Width(58).Render("›" + row)
-	}
-	return lipgloss.NewStyle().Width(58).Render(" " + row)
-}
-
-func meter(value, max int, color lipgloss.Color) string {
-	const width = 25
-	filled := value * width / max
-	if filled < 0 {
-		filled = 0
-	}
-	if filled > width {
-		filled = width
-	}
-	return lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("━", filled)) + lipgloss.NewStyle().Foreground(lipgloss.Color("#343B56")).Render(strings.Repeat("━", width-filled))
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#3B4261")).
+		Padding(1, boxPaddingX).Width(boxWidth).Render(section + "\n\n" + strings.Join(rows, "\n\n"))
+	return "\n  " + box + "\n\n  " + m.footerView() + "\n"
 }
 
 func rangeSize(r light.Range) int {

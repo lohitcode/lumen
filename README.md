@@ -10,19 +10,21 @@ Ships with a **WiZ driver** out of the box, but the light interface is small and
 ```
   STUDY LIGHT  WiZ @ 192.168.1.42
 
-  ●  ON     70%  •  5000 K
+  ● ON  70% • 5000 K
 
-  ╭─ CONTROLS ─────────────────────────────────────────────╮
-  │                                                        │
-  │  › Brightness      ━━━━━━━━━━━━━━━━━━━━━          70%  │
-  │                                                    │
-  │    Temperature     ━━━━━━━━━━━━━━━━━━            5000 K │
-  │                                                        │
-  ╰────────────────────────────────────────────────────────╯
+  ╭──────────────────────────────────────────────────────────╮
+  │                                                          │
+  │  CONTROLS                                                │
+  │                                                          │
+  │  ›  Brightness      ━━━━━━━━━━●━━━━━━━━━━━━━━       70%  │
+  │                                                          │
+  │     Temperature     ━━━━━━━━━━━━━━━●━━━━━━━━━━     5000 K │
+  │                                                          │
+  ╰──────────────────────────────────────────────────────────╯
 
-  Live status · refreshed just now
+  ● live  Applied to WiZ @ 192.168.1.42
 
-  ↑↓ select  ←→ adjust  o toggle power  s switch light  q quit
+  ↑↓ select  ←→ adjust  o power  s lights  q quit
 ```
 
 ## Features
