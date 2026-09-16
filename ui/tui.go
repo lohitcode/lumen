@@ -101,6 +101,7 @@ func newBrightnessBar() progress.Model {
 		progress.WithFillCharacters('█', '█'),
 		progress.WithSolidFill("#F5D67A"),
 		progress.WithoutPercentage(),
+		progress.WithSpringOptions(20, 1),
 	)
 	b.EmptyColor = string(trackColor)
 	return b
@@ -114,6 +115,7 @@ func newTempBar() progress.Model {
 		progress.WithFillCharacters('█', '█'),
 		progress.WithScaledGradient("#FFB86B", "#7FD1FF"),
 		progress.WithoutPercentage(),
+		progress.WithSpringOptions(20, 1),
 	)
 	b.EmptyColor = string(trackColor)
 	return b
@@ -138,7 +140,7 @@ func newModel(l light.Light, labels map[string]string, hooks Hooks) model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.refresh(), nextTick(), nextSpinner(), m.syncBars())
+	return tea.Batch(m.refresh(), nextTick(), nextSpinner())
 }
 
 func nextTick() tea.Cmd {
@@ -149,16 +151,20 @@ func nextSpinner() tea.Cmd {
 	return tea.Tick(spinnerEvery, func(t time.Time) tea.Msg { return spinnerTickMsg(t) })
 }
 
-// syncBars points both sliders at the current state; the bars glide there
-// on their internal springs instead of jumping.
-func (m model) syncBars() tea.Cmd {
+// syncBars points both sliders at the current state so they glide there on
+// their internal springs. It takes a pointer receiver ON PURPOSE: with a
+// value receiver the SetPercent mutations landed on a throwaway copy, so
+// the bars never received their targets and stayed empty.
+func (m *model) syncBars() tea.Cmd {
 	r := m.current.Ranges()
-	brightness := clamp01(float64(m.status.Brightness) / 100)
-	temp := clamp01(float64(m.status.Temp-r.Temp.Min) / float64(rangeSize(r.Temp)))
-	return tea.Batch(
-		m.brightnessBar.SetPercent(brightness),
-		m.tempBar.SetPercent(temp),
-	)
+	var cmds []tea.Cmd
+	if p := clamp01(float64(m.status.Brightness) / 100); p != m.brightnessBar.Percent() {
+		cmds = append(cmds, m.brightnessBar.SetPercent(p))
+	}
+	if p := clamp01(float64(m.status.Temp-r.Temp.Min) / float64(rangeSize(r.Temp))); p != m.tempBar.Percent() {
+		cmds = append(cmds, m.tempBar.SetPercent(p))
+	}
+	return tea.Batch(cmds...)
 }
 
 func clamp01(v float64) float64 {
@@ -245,6 +251,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tempBar = tm.(progress.Model)
 		return m, tea.Batch(bcmd, tcmd)
 	case statusMsg:
+		wasBusy := m.busy
 		m.busy = false
 		if msg.err != nil {
 			m.failures++
@@ -257,7 +264,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.status = msg.state
 		m.message = ""
-		return m, m.syncBars()
+		if wasBusy {
+			// The read raced an in-flight adjustment; the action's own
+			// read-back has not landed yet, so don't yank the sliders back.
+			return m, nil
+		}
+		cmd := m.syncBars()
+		return m, cmd
 	case actionMsg:
 		m.busy = false
 		if msg.err != nil {

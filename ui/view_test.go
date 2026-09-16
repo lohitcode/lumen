@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -112,6 +113,50 @@ func TestSelectedRowHighlightCoversEveryCell(t *testing.T) {
 		if bg != "" {
 			t.Fatalf("unselected row cell %d unexpectedly has background %q", i+1, bg)
 		}
+	}
+}
+
+// TestSyncBarsSetsTargetsFromState is a regression guard for a value-
+// receiver bug: syncBars used to mutate a throwaway copy of the model, so
+// the sliders never received their targets and stayed empty. With the
+// pointer receiver, the targets must land on the model itself.
+func TestSyncBarsSetsTargetsFromState(t *testing.T) {
+	ranges := light.Ranges{
+		Brightness: light.Range{Min: 10, Max: 100},
+		Temp:       light.Range{Min: 2700, Max: 6500},
+	}
+	m := model{
+		current:       fakeLight{ranges},
+		status:        light.State{On: true, Brightness: 45, Temp: 5300},
+		brightnessBar: newBrightnessBar(),
+		tempBar:       newTempBar(),
+		labels:        map[string]string{},
+	}
+	m.syncBars() // pointer receiver: must mutate m itself
+
+	if got := m.brightnessBar.Percent(); math.Abs(got-0.45) > 1e-9 {
+		t.Fatalf("brightness bar target = %v, want 0.45", got)
+	}
+	wantTemp := float64(5300-2700) / 3800
+	if got := m.tempBar.Percent(); math.Abs(got-wantTemp) > 1e-9 {
+		t.Fatalf("temperature bar target = %v, want %v", got, wantTemp)
+	}
+}
+
+// TestSyncBarsIsIdempotent keeps the 2-second refresh from restarting the
+// spring animation when the value has not changed.
+func TestSyncBarsIsIdempotent(t *testing.T) {
+	ranges := light.Ranges{Brightness: light.Range{Min: 10, Max: 100}, Temp: light.Range{Min: 2700, Max: 6500}}
+	m := model{
+		current:       fakeLight{ranges},
+		status:        light.State{On: true, Brightness: 45, Temp: 5300},
+		brightnessBar: newBrightnessBar(),
+		tempBar:       newTempBar(),
+		labels:        map[string]string{},
+	}
+	m.syncBars()
+	if cmd := m.syncBars(); cmd != nil {
+		t.Fatal("second sync with unchanged state should not re-animate the bars")
 	}
 }
 
