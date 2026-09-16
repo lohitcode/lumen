@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -68,8 +69,12 @@ func (m model) View() string {
 		fmt.Sprintf("%d%% • %d K", brightness, temp))
 
 	rows := []string{
-		controlRow(m.cursor == 0, "Brightness", m.brightnessBar.View(), fmt.Sprintf("%d%%", brightness)),
-		controlRow(m.cursor == 1, "Temperature", m.tempBar.View(), fmt.Sprintf("%d K", temp)),
+		controlRow(m.cursor == 0, "Brightness",
+			renderBar(m.brightnessBar.shown, meterWidth, "#F5D67A", m.cursor == 0),
+			fmt.Sprintf("%d%%", brightness)),
+		controlRow(m.cursor == 1, "Temperature",
+			renderBar(m.tempBar.shown, meterWidth, temperatureColor(temp, ranges.Temp), m.cursor == 1),
+			fmt.Sprintf("%d K", temp)),
 	}
 	section := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#8792BC")).Render("CONTROLS")
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#3B4261")).
@@ -78,8 +83,9 @@ func (m model) View() string {
 }
 
 // controlRow renders one slider row as fixed-width segments: a marker chip
-// around the selected row's name, then the animated progress bar, then the
-// value. Every segment keeps its exact width so nothing shifts.
+// around the selected row's name, the animated bar, then the value. When
+// selected, every segment (including gaps and the bar cells) shares the
+// highlight background, so the whole row is one symmetric bar.
 func controlRow(selected bool, name, bar, valueText string) string {
 	prefix := " "
 	if selected {
@@ -87,19 +93,43 @@ func controlRow(selected bool, name, bar, valueText string) string {
 	}
 	prefixSeg := lipgloss.NewStyle().Width(2).Render(prefix)
 	labelSeg := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E8EBFA")).Width(labelWidth).Render(name)
+	value := lipgloss.NewStyle().Foreground(lipgloss.Color("#D2D8F4")).Width(valueWidth).
+		Align(lipgloss.Right).Render(valueText)
 	if selected {
 		chip := lipgloss.NewStyle().Bold(true).Foreground(selectedFg).Background(selectedBg)
 		prefixSeg = chip.Width(2).Render(prefix)
 		labelSeg = chip.Width(labelWidth).Render(name)
-	}
-	value := lipgloss.NewStyle().Foreground(lipgloss.Color("#D2D8F4")).Width(valueWidth).
-		Align(lipgloss.Right).Render(valueText)
-	if selected {
-		value = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFF6D6")).Width(valueWidth).
-			Align(lipgloss.Right).Render(valueText)
+		value = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFF6D6")).Background(selectedBg).
+			Width(valueWidth).Align(lipgloss.Right).Render(valueText)
 	}
 	gap := strings.Repeat(" ", gapWidth)
+	if selected {
+		gap = lipgloss.NewStyle().Background(selectedBg).Render(gap)
+	}
 	return prefixSeg + labelSeg + gap + bar + gap + value
+}
+
+// renderBar draws a slider as a solid fill over a dim track, exactly width
+// cells wide. Because we own every cell, the bar can carry the selection
+// background itself — the full-row highlight stays symmetric during
+// animation. The fill is a run of one color and the track a run of another,
+// so rendering stays cheap at 60 fps.
+func renderBar(shown float64, width int, fillColor string, selected bool) string {
+	if shown < 0 {
+		shown = 0
+	}
+	if shown > 1 {
+		shown = 1
+	}
+	filled := int(math.Round(shown * float64(width)))
+	filledStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(fillColor))
+	trackStyle := lipgloss.NewStyle().Foreground(trackColor)
+	if selected {
+		filledStyle = filledStyle.Background(selectedBg)
+		trackStyle = trackStyle.Background(selectedBg)
+	}
+	return filledStyle.Render(strings.Repeat("█", filled)) +
+		trackStyle.Render(strings.Repeat("█", width-filled))
 }
 
 // statusView renders the bottom status line as fixed-width segments: an

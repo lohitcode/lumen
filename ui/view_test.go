@@ -46,8 +46,8 @@ func TestViewLineWidthsAreStable(t *testing.T) {
 		current:       fakeLight{ranges},
 		status:        light.State{On: true, Brightness: 70, Temp: 5000},
 		message:       "Connected",
-		brightnessBar: newBrightnessBar(),
-		tempBar:       newTempBar(),
+		brightnessBar: barState{shown: 0.7, target: 0.7},
+		tempBar:       barState{shown: 0.6, target: 0.6},
 		labels:        map[string]string{},
 	}
 
@@ -86,29 +86,24 @@ func withModel(m model, mutate func(*model)) model {
 }
 
 // TestSelectedRowHighlightCoversEveryCell walks the raw ANSI output of a
-// selected row and verifies the name chip carries the highlight background
-// on every one of its cells while the bar area and value carry none — the
-// animated bubbles/progress bar owns its own colors there. Nested style
-// resets previously cut the highlight short after the label, leaving an
-// asymmetric blob.
+// selected row and verifies every one of its cells — marker, name, the
+// animated bar, and the value — carries the highlight background. Nested
+// style resets previously cut the highlight short after the label, leaving
+// an asymmetric blob.
 func TestSelectedRowHighlightCoversEveryCell(t *testing.T) {
-	row := controlRow(true, "Brightness", strings.Repeat("█", meterWidth), "45%")
+	row := controlRow(true, "Brightness", renderBar(0.45, meterWidth, "#F5D67A", true), "45%")
 	cells := cellBackgrounds(row)
 	if len(cells) != rowWidth {
 		t.Fatalf("selected row renders %d cells, want %d", len(cells), rowWidth)
 	}
 	const want = "48;2;39;44;67" // selectedBg #272C43
-	chip := 2 + labelWidth       // marker + name carry the highlight
 	for i, bg := range cells {
-		if i < chip && bg != want {
+		if bg != want {
 			t.Fatalf("selected row cell %d is missing the highlight background (found %q)", i+1, bg)
-		}
-		if i >= chip && bg != "" {
-			t.Fatalf("selected row cell %d unexpectedly has a background (found %q)", i+1, bg)
 		}
 	}
 
-	idle := controlRow(false, "Brightness", strings.Repeat("█", meterWidth), "45%")
+	idle := controlRow(false, "Brightness", renderBar(0.45, meterWidth, "#F5D67A", false), "45%")
 	for i, bg := range cellBackgrounds(idle) {
 		if bg != "" {
 			t.Fatalf("unselected row cell %d unexpectedly has background %q", i+1, bg)
@@ -128,17 +123,17 @@ func TestSyncBarsSetsTargetsFromState(t *testing.T) {
 	m := model{
 		current:       fakeLight{ranges},
 		status:        light.State{On: true, Brightness: 45, Temp: 5300},
-		brightnessBar: newBrightnessBar(),
-		tempBar:       newTempBar(),
+		brightnessBar: barState{shown: 0.7, target: 0.7},
+		tempBar:       barState{shown: 0.6, target: 0.6},
 		labels:        map[string]string{},
 	}
 	m.syncBars() // pointer receiver: must mutate m itself
 
-	if got := m.brightnessBar.Percent(); math.Abs(got-0.45) > 1e-9 {
+	if got := m.brightnessBar.target; math.Abs(got-0.45) > 1e-9 {
 		t.Fatalf("brightness bar target = %v, want 0.45", got)
 	}
 	wantTemp := float64(5300-2700) / 3800
-	if got := m.tempBar.Percent(); math.Abs(got-wantTemp) > 1e-9 {
+	if got := m.tempBar.target; math.Abs(got-wantTemp) > 1e-9 {
 		t.Fatalf("temperature bar target = %v, want %v", got, wantTemp)
 	}
 }
@@ -150,8 +145,8 @@ func TestSyncBarsIsIdempotent(t *testing.T) {
 	m := model{
 		current:       fakeLight{ranges},
 		status:        light.State{On: true, Brightness: 45, Temp: 5300},
-		brightnessBar: newBrightnessBar(),
-		tempBar:       newTempBar(),
+		brightnessBar: barState{shown: 0.7, target: 0.7},
+		tempBar:       barState{shown: 0.6, target: 0.6},
 		labels:        map[string]string{},
 	}
 	m.syncBars()
@@ -172,8 +167,8 @@ func TestHeaderPrefersAliasOverAddress(t *testing.T) {
 		return model{
 			current:       fakeLight{ranges},
 			status:        light.State{On: true, Brightness: 45, Temp: 4900},
-			brightnessBar: newBrightnessBar(),
-			tempBar:       newTempBar(),
+			brightnessBar: barState{shown: 0.45, target: 0.45},
+			tempBar:       barState{shown: 0.58, target: 0.58},
 			labels:        labels,
 		}
 	}

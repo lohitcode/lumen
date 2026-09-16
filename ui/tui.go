@@ -2,16 +2,17 @@
 // dashboard with a two-second refresh, keyboard-driven power, brightness, and
 // white-temperature controls, and a switcher for jumping between lights.
 //
-// The sliders are native bubbles/progress bars with spring animation at
-// 60 fps, and the layout is built from fixed-width segments so state changes
-// never shift neighboring text.
+// The sliders animate on a dedicated 60 fps frame loop with time-based
+// smoothing, so the motion stays even regardless of tick jitter, and the
+// layout is built from fixed-width segments so state changes never shift
+// neighboring text.
 package ui
 
 import (
+	"math"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -32,8 +33,8 @@ type Hooks struct {
 // receive switch/rename events for persistence.
 func Run(l light.Light, labels map[string]string, hooks Hooks) error {
 	// Alternate screen keeps the TUI separate from the shell's scrollback;
-	// mouse reporting captures trackpad/wheel gestures, and the explicit
-	// frame rate keeps the spring-animated sliders at the full 60 fps.
+	// mouse reporting captures trackpad/wheel gestures, and the frame rate
+	// matches the slider animation loop.
 	p := tea.NewProgram(newModel(l, labels, hooks),
 		tea.WithAltScreen(), tea.WithMouseAllMotion(), tea.WithFPS(60))
 	_, err := p.Run()
@@ -44,6 +45,11 @@ const (
 	discoverTimeout = 2 * time.Second
 	refreshEvery    = 2 * time.Second
 	spinnerEvery    = 500 * time.Millisecond
+	frameEvery      = time.Second / 60
+	// Time constant of the slider glide: smaller is snappier, larger is
+	// softer. Exponential smoothing is frame-rate independent, so the
+	// motion is identical even when individual frames land late.
+	sliderTau = 70 * time.Millisecond
 	// A single missed UDP read is unremarkable; only report an error once
 	// several reads in a row have failed, so the status line doesn't flash.
 	maxReadFailures = 2
@@ -72,14 +78,23 @@ type lightsMsg struct {
 }
 type tickMsg time.Time
 type spinnerTickMsg time.Time
+type animFrameMsg time.Time
+
+// barState is one animated slider: shown eases toward target every frame.
+type barState struct {
+	shown  float64 // 0..1 currently displayed
+	target float64 // 0..1 where the bar is heading
+}
 
 type model struct {
 	current       light.Light
 	status        light.State
 	labels        map[string]string
 	hooks         Hooks
-	brightnessBar progress.Model
-	tempBar       progress.Model
+	brightnessBar barState
+	tempBar       barState
+	animRunning   bool
+	lastFrame     time.Time
 	input         textinput.Model
 	renaming      bool
 	mode          mode
@@ -94,47 +109,22 @@ type model struct {
 	quitting      bool
 }
 
-// newBrightnessBar builds the spring-animated brightness slider.
-func newBrightnessBar() progress.Model {
-	b := progress.New(
-		progress.WithWidth(meterWidth),
-		progress.WithFillCharacters('█', '█'),
-		progress.WithSolidFill("#F5D67A"),
-		progress.WithoutPercentage(),
-		progress.WithSpringOptions(20, 1),
-	)
-	b.EmptyColor = string(trackColor)
-	return b
-}
-
-// newTempBar builds the temperature slider; its fill sweeps warm to cool
-// across the bar so the color itself reads as the kelvin value.
-func newTempBar() progress.Model {
-	b := progress.New(
-		progress.WithWidth(meterWidth),
-		progress.WithFillCharacters('█', '█'),
-		progress.WithScaledGradient("#FFB86B", "#7FD1FF"),
-		progress.WithoutPercentage(),
-		progress.WithSpringOptions(20, 1),
-	)
-	b.EmptyColor = string(trackColor)
-	return b
-}
-
 func newModel(l light.Light, labels map[string]string, hooks Hooks) model {
 	m := model{
-		current:       l,
-		labels:        labels,
-		hooks:         hooks,
-		brightnessBar: newBrightnessBar(),
-		tempBar:       newTempBar(),
-		message:       connectingMessage,
+		current: l,
+		labels:  labels,
+		hooks:   hooks,
+		message: connectingMessage,
 	}
-	// Seed with the real state when it is already known so the first paint
-	// never flashes wrong values; the refresh loop takes over from there.
+	// Seed with the real state when it is already known so the sliders
+	// start filled at the light's current values; the refresh loop takes
+	// over from there.
 	if state, err := l.State(); err == nil {
 		m.status = state
 		m.message = ""
+		m.setBarTargets()
+		m.brightnessBar.shown = m.brightnessBar.target
+		m.tempBar.shown = m.tempBar.target
 	}
 	return m
 }
@@ -151,20 +141,53 @@ func nextSpinner() tea.Cmd {
 	return tea.Tick(spinnerEvery, func(t time.Time) tea.Msg { return spinnerTickMsg(t) })
 }
 
-// syncBars points both sliders at the current state so they glide there on
-// their internal springs. It takes a pointer receiver ON PURPOSE: with a
-// value receiver the SetPercent mutations landed on a throwaway copy, so
-// the bars never received their targets and stayed empty.
-func (m *model) syncBars() tea.Cmd {
+func nextAnimFrame() tea.Cmd {
+	return tea.Tick(frameEvery, func(t time.Time) tea.Msg { return animFrameMsg(t) })
+}
+
+// setBarTargets points both sliders at the current state.
+func (m *model) setBarTargets() {
 	r := m.current.Ranges()
-	var cmds []tea.Cmd
-	if p := clamp01(float64(m.status.Brightness) / 100); p != m.brightnessBar.Percent() {
-		cmds = append(cmds, m.brightnessBar.SetPercent(p))
+	m.brightnessBar.target = clamp01(float64(m.status.Brightness) / 100)
+	m.tempBar.target = clamp01(float64(m.status.Temp-r.Temp.Min) / float64(rangeSize(r.Temp)))
+}
+
+// syncBars updates the slider targets and makes sure the frame loop is
+// running so they glide there.
+func (m *model) syncBars() tea.Cmd {
+	m.setBarTargets()
+	return m.ensureAnimFrame()
+}
+
+// ensureAnimFrame starts the 60 fps frame loop if it is not already running.
+func (m *model) ensureAnimFrame() tea.Cmd {
+	if m.animRunning {
+		return nil
 	}
-	if p := clamp01(float64(m.status.Temp-r.Temp.Min) / float64(rangeSize(r.Temp))); p != m.tempBar.Percent() {
-		cmds = append(cmds, m.tempBar.SetPercent(p))
+	m.animRunning = true
+	m.lastFrame = time.Now()
+	return nextAnimFrame()
+}
+
+// stepBars advances the glide using the real elapsed time, so the motion is
+// identical whether a frame lands on schedule or a few milliseconds late.
+func (m *model) stepBars(now time.Time) {
+	dt := now.Sub(m.lastFrame).Seconds()
+	if dt <= 0 {
+		dt = float64(frameEvery) / float64(time.Second)
 	}
-	return tea.Batch(cmds...)
+	if dt > 0.1 {
+		dt = 0.1
+	}
+	m.lastFrame = now
+	blend := 1 - math.Exp(-dt/sliderTau.Seconds())
+	m.brightnessBar.shown += (m.brightnessBar.target - m.brightnessBar.shown) * blend
+	m.tempBar.shown += (m.tempBar.target - m.tempBar.shown) * blend
+}
+
+func (m *model) barsAnimating() bool {
+	return math.Abs(m.brightnessBar.shown-m.brightnessBar.target) > 0.0005 ||
+		math.Abs(m.tempBar.shown-m.tempBar.target) > 0.0005
 }
 
 func clamp01(v float64) float64 {
@@ -242,14 +265,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "right", "l":
 			return m.adjust(5, 100)
 		}
-	case progress.FrameMsg:
-		// Both sliders animate on their internal springs; route frames and
-		// keep the returned command alive so the animation runs at 60 fps.
-		bm, bcmd := m.brightnessBar.Update(msg)
-		m.brightnessBar = bm.(progress.Model)
-		tm, tcmd := m.tempBar.Update(msg)
-		m.tempBar = tm.(progress.Model)
-		return m, tea.Batch(bcmd, tcmd)
+	case animFrameMsg:
+		if !m.animRunning {
+			return m, nil
+		}
+		m.stepBars(time.Time(msg))
+		if m.barsAnimating() {
+			return m, nextAnimFrame()
+		}
+		// Settled: snap to the exact target and stop the loop.
+		m.brightnessBar.shown = m.brightnessBar.target
+		m.tempBar.shown = m.tempBar.target
+		m.animRunning = false
+		return m, nil
 	case statusMsg:
 		wasBusy := m.busy
 		m.busy = false
@@ -386,12 +414,14 @@ func (m model) adjust(brightness, temp int) (tea.Model, tea.Cmd) {
 	m.busy = true
 	if m.cursor == 0 {
 		value := r.Brightness.Clamp(m.status.Brightness + brightness)
-		slide := m.brightnessBar.SetPercent(clamp01(float64(value) / 100))
-		return m, tea.Batch(slide, m.change(func(l light.Light) error { return l.SetBrightness(value) }))
+		m.brightnessBar.target = clamp01(float64(value) / 100)
+		return m, tea.Batch(m.ensureAnimFrame(),
+			m.change(func(l light.Light) error { return l.SetBrightness(value) }))
 	}
 	value := r.Temp.Clamp(m.status.Temp + temp)
-	slide := m.tempBar.SetPercent(clamp01(float64(value-r.Temp.Min) / float64(rangeSize(r.Temp))))
-	return m, tea.Batch(slide, m.change(func(l light.Light) error { return l.SetTemp(value) }))
+	m.tempBar.target = clamp01(float64(value-r.Temp.Min) / float64(rangeSize(r.Temp)))
+	return m, tea.Batch(m.ensureAnimFrame(),
+		m.change(func(l light.Light) error { return l.SetTemp(value) }))
 }
 
 func identity(l light.Light) string { return l.Driver() + "/" + l.Address() }
