@@ -160,6 +160,34 @@ func TestSyncBarsIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestHeaderPrefersAliasOverAddress makes sure a light with a user-set name
+// shows the name in the header, and one without falls back to the device
+// label (the address).
+func TestHeaderPrefersAliasOverAddress(t *testing.T) {
+	ranges := light.Ranges{
+		Brightness: light.Range{Min: 10, Max: 100},
+		Temp:       light.Range{Min: 2700, Max: 6500},
+	}
+	new := func(labels map[string]string) model {
+		return model{
+			current:       fakeLight{ranges},
+			status:        light.State{On: true, Brightness: 45, Temp: 4900},
+			brightnessBar: newBrightnessBar(),
+			tempBar:       newTempBar(),
+			labels:        labels,
+		}
+	}
+
+	named := new(map[string]string{"fake/127.0.0.1": "Study Light"})
+	if view := named.View(); !strings.Contains(view, "Study Light") || strings.Contains(view, "Fake @ 127.0.0.1") {
+		t.Error("header must show the user-set alias when one exists")
+	}
+	unnamed := new(map[string]string{})
+	if view := unnamed.View(); !strings.Contains(view, "Fake @ 127.0.0.1") {
+		t.Error("header must fall back to the device label when no alias is set")
+	}
+}
+
 // cellBackgrounds renders one background color per visible cell by walking
 // the string's SGR escape sequences. Glyphs are assumed single-width.
 func cellBackgrounds(s string) []string {

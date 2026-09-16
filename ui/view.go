@@ -52,7 +52,7 @@ func (m model) View() string {
 	color := temperatureColor(temp, ranges.Temp)
 
 	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFF1C7")).Render("LUMEN")
-	chip := lipgloss.NewStyle().Foreground(lipgloss.Color("#8792BC")).Render("  " + m.current.Label())
+	chip := lipgloss.NewStyle().Foreground(lipgloss.Color("#8792BC")).Render("  " + m.labelFor(m.current))
 
 	// Fixed-width power badge: ON and OFF occupy the same space, so the
 	// values after it never shift when power toggles.
