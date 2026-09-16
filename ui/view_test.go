@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -85,25 +86,31 @@ func withModel(m model, mutate func(*model)) model {
 	return m
 }
 
-// TestSelectedRowHighlightCoversEveryCell walks the raw ANSI output of a
-// selected row and verifies every one of its cells — marker, name, the
-// animated bar, and the value — carries the highlight background. Nested
-// style resets previously cut the highlight short after the label, leaving
-// an asymmetric blob.
-func TestSelectedRowHighlightCoversEveryCell(t *testing.T) {
-	row := controlRow(true, "Brightness", renderBar(0.45, meterWidth, "#F5D67A", true), "45%")
+// TestSelectedRowHighlightCoversTextOnly walks the raw ANSI output of a
+// selected row and verifies the highlight background lands exactly on the
+// text — the marker+name chip and the value — while the bar's cells keep
+// their own colors. Nested style resets previously cut the highlight short
+// after the label, leaving an asymmetric blob.
+func TestSelectedRowHighlightCoversTextOnly(t *testing.T) {
+	row := controlRow(true, "Brightness", renderBar(0.45, meterWidth, "#F5D67A"), "45%")
 	cells := cellBackgrounds(row)
 	if len(cells) != rowWidth {
 		t.Fatalf("selected row renders %d cells, want %d", len(cells), rowWidth)
 	}
-	const want = "48;2;39;44;67" // selectedBg #272C43
+	const want = "48;2;39;44;67"        // selectedBg #272C43
+	chip := 2 + labelWidth              // marker + name
+	valueStart := rowWidth - valueWidth // value sits right-aligned
 	for i, bg := range cells {
-		if bg != want {
-			t.Fatalf("selected row cell %d is missing the highlight background (found %q)", i+1, bg)
+		onText := i < chip || i >= valueStart
+		if onText && bg != want {
+			t.Fatalf("selected row cell %d (text) is missing the highlight background (found %q)", i+1, bg)
+		}
+		if !onText && bg != "" {
+			t.Fatalf("selected row cell %d (bar/gap area) unexpectedly has a background (found %q)", i+1, bg)
 		}
 	}
 
-	idle := controlRow(false, "Brightness", renderBar(0.45, meterWidth, "#F5D67A", false), "45%")
+	idle := controlRow(false, "Brightness", renderBar(0.45, meterWidth, "#F5D67A"), "45%")
 	for i, bg := range cellBackgrounds(idle) {
 		if bg != "" {
 			t.Fatalf("unselected row cell %d unexpectedly has background %q", i+1, bg)
@@ -180,6 +187,47 @@ func TestHeaderPrefersAliasOverAddress(t *testing.T) {
 	unnamed := new(map[string]string{})
 	if view := unnamed.View(); !strings.Contains(view, "Fake @ 127.0.0.1") {
 		t.Error("header must fall back to the device label when no alias is set")
+	}
+}
+
+// TestBoxBordersAreAligned is a regression guard for the switcher box
+// rendering with its top border indented relative to its sides: the whole
+// frame is indented uniformly, so every border character must sit at the
+// same column.
+func TestBoxBordersAreAligned(t *testing.T) {
+	ranges := light.Ranges{
+		Brightness: light.Range{Min: 10, Max: 100},
+		Temp:       light.Range{Min: 2700, Max: 6500},
+	}
+	m := model{
+		current:       fakeLight{ranges},
+		status:        light.State{On: true, Brightness: 45, Temp: 4900},
+		brightnessBar: barState{shown: 0.45, target: 0.45},
+		tempBar:       barState{shown: 0.58, target: 0.58},
+		labels:        map[string]string{},
+	}
+
+	for name, view := range map[string]string{"dashboard": m.View(), "switcher": m.viewPicker()} {
+		want := -1
+		for _, line := range strings.Split(view, "\n") {
+			runes := []rune(line)
+			for _, ch := range []rune{'\u256d', '\u2502', '\u2570'} {
+				idx := slices.Index(runes, ch)
+				if idx < 0 {
+					continue
+				}
+				if want < 0 {
+					want = idx
+					continue
+				}
+				if idx != want {
+					t.Errorf("%s: border %q at column %d, want %d", name, string(ch), idx, want)
+				}
+			}
+		}
+		if want < 0 {
+			t.Errorf("%s: no border characters found", name)
+		}
 	}
 }
 

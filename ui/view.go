@@ -70,22 +70,46 @@ func (m model) View() string {
 
 	rows := []string{
 		controlRow(m.cursor == 0, "Brightness",
-			renderBar(m.brightnessBar.shown, meterWidth, "#F5D67A", m.cursor == 0),
+			renderBar(m.brightnessBar.shown, meterWidth, "#F5D67A"),
 			fmt.Sprintf("%d%%", brightness)),
 		controlRow(m.cursor == 1, "Temperature",
-			renderBar(m.tempBar.shown, meterWidth, temperatureColor(temp, ranges.Temp), m.cursor == 1),
+			renderBar(m.tempBar.shown, meterWidth, temperatureColor(temp, ranges.Temp)),
 			fmt.Sprintf("%d K", temp)),
 	}
 	section := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#8792BC")).Render("CONTROLS")
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#3B4261")).
 		Padding(1, boxPaddingX).Width(boxWidth).Render(section + "\n\n" + strings.Join(rows, "\n\n"))
-	return "\n  " + title + chip + "\n\n  " + bulb + " " + power + current + "\n\n" + box + "\n\n  " + m.statusView() + "\n\n  " + m.footerView() + "\n"
+	body := strings.Join([]string{
+		title + chip,
+		"",
+		bulb + " " + power + current,
+		"",
+		box,
+		"",
+		m.statusView(),
+		"",
+		m.footerView(),
+	}, "\n")
+	return "\n" + indent(body, 2) + "\n"
 }
 
-// controlRow renders one slider row as fixed-width segments: a marker chip
-// around the selected row's name, the animated bar, then the value. When
-// selected, every segment (including gaps and the bar cells) shares the
-// highlight background, so the whole row is one symmetric bar.
+// indent prefixes every non-empty line of s with n spaces. Prefixing only
+// the first line of a multi-line block (as string concatenation does) shifts
+// a box's top border relative to its sides.
+func indent(s string, n int) string {
+	pad := strings.Repeat(" ", n)
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if line != "" {
+			lines[i] = pad + line
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// controlRow renders one slider row as fixed-width segments. When selected,
+// only the text — the marker+name chip and the value — carries the highlight
+// background; the bar keeps its own colors.
 func controlRow(selected bool, name, bar, valueText string) string {
 	prefix := " "
 	if selected {
@@ -99,22 +123,16 @@ func controlRow(selected bool, name, bar, valueText string) string {
 		chip := lipgloss.NewStyle().Bold(true).Foreground(selectedFg).Background(selectedBg)
 		prefixSeg = chip.Width(2).Render(prefix)
 		labelSeg = chip.Width(labelWidth).Render(name)
-		value = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFF6D6")).Background(selectedBg).
-			Width(valueWidth).Align(lipgloss.Right).Render(valueText)
+		value = chip.Width(valueWidth).Align(lipgloss.Right).Render(valueText)
 	}
-	gap := strings.Repeat(" ", gapWidth)
-	if selected {
-		gap = lipgloss.NewStyle().Background(selectedBg).Render(gap)
-	}
-	return prefixSeg + labelSeg + gap + bar + gap + value
+	return prefixSeg + labelSeg + strings.Repeat(" ", gapWidth) + bar +
+		strings.Repeat(" ", gapWidth) + value
 }
 
 // renderBar draws a slider as a solid fill over a dim track, exactly width
-// cells wide. Because we own every cell, the bar can carry the selection
-// background itself — the full-row highlight stays symmetric during
-// animation. The fill is a run of one color and the track a run of another,
-// so rendering stays cheap at 60 fps.
-func renderBar(shown float64, width int, fillColor string, selected bool) string {
+// cells wide. The bar keeps its own colors — the selection highlight lives
+// only on the row's text.
+func renderBar(shown float64, width int, fillColor string) string {
 	if shown < 0 {
 		shown = 0
 	}
@@ -124,10 +142,6 @@ func renderBar(shown float64, width int, fillColor string, selected bool) string
 	filled := int(math.Round(shown * float64(width)))
 	filledStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(fillColor))
 	trackStyle := lipgloss.NewStyle().Foreground(trackColor)
-	if selected {
-		filledStyle = filledStyle.Background(selectedBg)
-		trackStyle = trackStyle.Background(selectedBg)
-	}
 	return filledStyle.Render(strings.Repeat("█", filled)) +
 		trackStyle.Render(strings.Repeat("█", width-filled))
 }
@@ -192,7 +206,8 @@ func (m model) viewPicker() string {
 	}
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#3B4261")).
 		Padding(1, boxPaddingX).Width(boxWidth).Render(section + "\n\n" + strings.Join(rows, "\n\n"))
-	return "\n  " + box + "\n\n  " + m.pickerFooterView() + "\n"
+	body := strings.Join([]string{box, "", m.pickerFooterView()}, "\n")
+	return "\n" + indent(body, 2) + "\n"
 }
 
 // pickerFooterView renders the switcher's key hints with keycap styling.

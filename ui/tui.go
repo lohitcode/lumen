@@ -247,9 +247,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "s":
 			m.mode = modeSearching
 			m.message = ""
-			// The switcher frame is shorter than the dashboard frame; a
-			// full repaint avoids stale cells from the previous frame.
-			return m, tea.Batch(m.discover(), tea.ClearScreen)
+			return m, m.discover()
 		case "o", " ":
 			m.busy = true
 			on := !m.status.On
@@ -351,13 +349,11 @@ func (m model) updatePicking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.renaming = false
 			m.input.Blur()
-			// The edited row changes width here; repaint fully so no
-			// background tail from the editor lingers.
-			return m, tea.ClearScreen
+			return m, nil
 		case "esc":
 			m.renaming = false
 			m.input.Blur()
-			return m, tea.ClearScreen
+			return m, nil
 		}
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
@@ -367,7 +363,7 @@ func (m model) updatePicking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
 		m.mode = modeNormal
-		return m, tea.ClearScreen
+		return m, nil
 	case "up", "k":
 		if m.pick > 0 {
 			m.pick--
@@ -391,9 +387,8 @@ func (m model) updatePicking(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.hooks.OnSwitch != nil {
 				m.hooks.OnSwitch(chosen)
 			}
-			return m, tea.Batch(m.refresh(), tea.ClearScreen)
+			return m, m.refresh()
 		}
-		return m, tea.ClearScreen
 	}
 	return m, nil
 }
