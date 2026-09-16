@@ -77,7 +77,7 @@ Lights show their friendly device name when the driver can read one. WiZ firmwar
 | --- | --- |
 | `o` / `space` | Toggle power |
 | `↑` `↓` / `k` `j` | Select brightness or temperature |
-| `←` `→` / `h` `l` | Adjust the selected value (±5% brightness, ±100 K) |
+| `←` `→` / `h` `l` | Adjust the selected value (±2% brightness, ±100 K) |
 | `s` | Scan the network and switch to another light |
 | `n` (in switcher) | Rename the highlighted light inline |
 | `q` / `esc` / `ctrl+c` | Quit |

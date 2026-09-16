@@ -261,9 +261,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 			}
 		case "left", "h":
-			return m.adjust(-5, -100)
+			return m.adjust(-2, -100)
 		case "right", "l":
-			return m.adjust(5, 100)
+			return m.adjust(2, 100)
 		}
 	case animFrameMsg:
 		if !m.animRunning {

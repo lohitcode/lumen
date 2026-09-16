@@ -13,7 +13,10 @@ type Light struct {
 }
 
 var wizRanges = light.Ranges{
-	Brightness: light.Range{Min: 10, Max: 100},
+	// WiZ bulbs dim below their documented 10% floor and truncate
+	// fractional values to whole percents (verified on hardware), so
+	// brightness stays integer with a 1% floor.
+	Brightness: light.Range{Min: 1, Max: 100},
 	Temp:       light.Range{Min: 2700, Max: 6500},
 }
 

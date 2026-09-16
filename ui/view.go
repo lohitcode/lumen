@@ -49,6 +49,7 @@ func (m model) View() string {
 	if temp == 0 {
 		temp = 6500
 	}
+	brightnessText := fmt.Sprintf("%d%%", brightness)
 	ranges := m.current.Ranges()
 	color := temperatureColor(temp, ranges.Temp)
 
@@ -71,7 +72,7 @@ func (m model) View() string {
 	rows := []string{
 		controlRow(m.cursor == 0, "Brightness",
 			renderBar(m.brightnessBar.shown, meterWidth, "#F5D67A"),
-			fmt.Sprintf("%d%%", brightness)),
+			brightnessText),
 		controlRow(m.cursor == 1, "Temperature",
 			renderBar(m.tempBar.shown, meterWidth, temperatureColor(temp, ranges.Temp)),
 			fmt.Sprintf("%d K", temp)),
